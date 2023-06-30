@@ -49,13 +49,13 @@ model = Net()
 # Just normalization for validation
 data_transforms = {
     'train': transforms.Compose([
-        transforms.RandomResizedCrop(64),  # For data augmentation
+        transforms.RandomResizedCrop(128),  # For data augmentation
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
     ]),
     'val': transforms.Compose([
-        transforms.Resize(64),
+        transforms.Resize(128),
         transforms.ToTensor(),
         transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
     ]),
@@ -80,22 +80,42 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model.to(device)
 
 for epoch in range(num_epochs):
-    running_loss = 0.0
-    pbar = tqdm(dataloaders['train'], ncols=80)
-    for inputs, labels in pbar:
-        inputs, labels = inputs.to(device), labels.to(device)
-        optimizer.zero_grad()
-        outputs = model(inputs)
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
-        running_loss += loss.item()
-        pbar.set_postfix({'Loss': running_loss / (len(dataloaders['train']))})
+    for phase in ['train', 'val']:
+        if phase == 'train':
+            model.train()  # Set model to training mode
+        else:
+            model.eval()  # Set model to evaluate mode
 
-    exp_lr_scheduler.step()  # Step in learning rate scheduler
+        running_loss = 0.0
+        correct_predictions = 0
 
-    pbar.close()
-    print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {running_loss / (len(dataloaders['train']))}")
+        pbar = tqdm(dataloaders[phase], ncols=80)
+        for inputs, labels in pbar:
+            inputs, labels = inputs.to(device), labels.to(device)
+            optimizer.zero_grad()
+
+            # Forward pass
+            with torch.set_grad_enabled(phase == 'train'):  # Only perform backpropagation if in training phase
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+                _, preds = torch.max(outputs, 1)
+
+                # Backward pass and optimize
+                if phase == 'train':
+                    loss.backward()
+                    optimizer.step()
+
+            running_loss += loss.item() * inputs.size(0)
+            correct_predictions += torch.sum(preds == labels.data)
+            
+        if phase == 'train':
+            exp_lr_scheduler.step()
+
+        epoch_loss = running_loss / len(dataloaders[phase].dataset)
+        epoch_acc = correct_predictions.double() / len(dataloaders[phase].dataset)
+
+        print(f'{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}')
+
 
 # save model
 torch.save(model.state_dict(), 'my_model.pth')
